@@ -25,10 +25,10 @@ The dashboard does **not** show rent collected or outstanding balances: payment 
 ## Requirements
 
 - Node.js 20.19+ or 22.12+ and npm.
-- PostgreSQL 14+ (local Compose is provided; Docker must be installed separately) or another PostgreSQL instance.
+- PostgreSQL 14+ (local Compose is optional; Docker must be installed separately) or another PostgreSQL instance.
 - A random session secret of at least 32 characters.
 
-No PostgreSQL client/server or Docker executable was available in the workspace when this was built. API schema/code checks and database-independent tests can run here; applying the migration, API database readiness, seeded sign-in and live persistence require a running PostgreSQL service.
+The application has been verified against PostgreSQL 16, including migrations, seeded sign-in, persistence, and the database integration test.
 
 ## Local setup
 
@@ -41,11 +41,18 @@ cp .env.example .env
 
 Set `SESSION_SECRET` in `.env` to a private random string (for example, generate 32 random bytes locally). The example value is a placeholder and must not be used outside local development.
 
-Start PostgreSQL:
+Start or check PostgreSQL using either your existing local service or Docker Compose:
 
 ```sh
+# Existing Homebrew PostgreSQL service (start it only if it is stopped):
+brew services start postgresql@16
+pg_isready
+
+# Or use the included PostgreSQL service:
 docker compose up -d postgres
 ```
+
+Ensure `DATABASE_URL` in `.env` points to a database and role that exist in your setup. For a local server, create the application database if needed with `createdb pgplanner`; create the isolated `pgplanner_test` database too if you plan to run integration tests.
 
 Then create the Prisma client, deploy migrations and optionally seed clearly labelled development data:
 

@@ -344,7 +344,7 @@ function InventoryPage() {
   const queryClient = useQueryClient();
   const notify = useNotice();
   const properties = useQuery({ queryKey: [...queryKeys.properties, "", 1, "ACTIVE"], queryFn: () => routes.properties("", 1) });
-  const [propertyId, setPropertyId] = useState("");
+  const [propertyId, setPropertyId] = useState(() => new URLSearchParams(window.location.search).get("propertyId") || "");
   const [roomFilter, setRoomFilter] = useState("all");
   const [floorFilter, setFloorFilter] = useState("all");
   const [bedStatusFilter, setBedStatusFilter] = useState("all");
@@ -360,10 +360,14 @@ function InventoryPage() {
       setRoomForm(true);
       params.delete("newRoom");
     } else if (params.get("newBed") === "1" && detail.data) {
-      const room = detail.data.rooms.find((candidate) => candidate.status === "ACTIVE");
+      const requestedRoomId = params.get("roomId");
+      const room = detail.data.rooms.find((candidate) =>
+        candidate.status === "ACTIVE" && (!requestedRoomId || candidate.id === requestedRoomId),
+      );
       if (room) setBedFormRoom(room);
-      else notify("Add an active room before adding a bed.", "error");
+      else notify("That room is no longer available for adding a bed.", "error");
       params.delete("newBed");
+      params.delete("roomId");
     }
     if (params.size !== new URLSearchParams(window.location.search).size) {
       const suffix = params.toString();
@@ -377,7 +381,7 @@ function InventoryPage() {
   });
   const addBed = useMutation({
     mutationFn: ({ roomId, data }: { roomId: string; data: object }) => routes.createBed(roomId, data),
-    onSuccess: async () => { setBedFormRoom(undefined); await queryClient.invalidateQueries({ queryKey: queryKeys.property(activeId) }); await queryClient.invalidateQueries({ queryKey: queryKeys.summary }); notify("Bed added."); },
+    onSuccess: async () => { setBedFormRoom(undefined); await queryClient.invalidateQueries({ queryKey: queryKeys.property(activeId) }); await queryClient.invalidateQueries({ queryKey: ["available-beds"] }); await queryClient.invalidateQueries({ queryKey: queryKeys.summary }); notify("Bed added."); },
     onError: (error) => notify(error.message, "error"),
   });
   const floors = [...new Set(detail.data?.rooms.map((room) => room.floor) || [])];
@@ -425,6 +429,7 @@ function TenantsPage() {
 function OccupancyPage() {
   const queryClient = useQueryClient();
   const notify = useNotice();
+  const navigate = useNavigate();
   const [showForm, setShowForm] = useState(false);
   const occupancies = useQuery({ queryKey: queryKeys.occupancies, queryFn: async () => (await routes.occupancies()).data });
   const tenants = useQuery({ queryKey: [...queryKeys.tenants, "", 1], queryFn: async () => (await routes.tenants("", 1)).data });
@@ -435,9 +440,12 @@ function OccupancyPage() {
     queryFn: async () => {
       const all = await Promise.all(properties.data!.data.map(async (property) => {
         const detail = (await routes.property(property.id)).data;
-        return detail.rooms.flatMap((room) => room.beds.map((bed) => ({ ...bed, room: { ...room, property } })));
+        return {
+          beds: detail.rooms.flatMap((room) => room.beds.map((bed) => ({ ...bed, room: { ...room, property } }))),
+          rooms: detail.rooms.map((room) => ({ ...room, property })),
+        };
       }));
-      return all.flat();
+      return { beds: all.flatMap((property) => property.beds), rooms: all.flatMap((property) => property.rooms) };
     },
   });
   const create = useMutation({
@@ -457,7 +465,7 @@ function OccupancyPage() {
     <section className="surface table-surface">
       {busy ? <TableSkeleton /> : failed ? <ErrorState message={error?.message || "Could not load occupancy."} onRetry={() => { void occupancies.refetch(); void tenants.refetch(); void properties.refetch(); void roomQueries.refetch(); }} /> : occupancies.data!.length === 0 ? <EmptyState title="No active stays" description="Add a tenant and an available bed, then create the first check-in." action={<button className="button primary" onClick={() => setShowForm(true)}><Plus size={15} /> Check in tenant</button>} /> : <div className="table-scroll"><table><thead><tr><th>TENANT</th><th>PROPERTY & BED</th><th>CHECK-IN</th><th>PLANNED CHECK-OUT</th><th>MONTHLY RENT</th><th /></tr></thead><tbody>{occupancies.data!.map((stay) => <tr key={stay.id}><td><span className="property-cell"><span className="tenant-avatar">{stay.tenant.fullName[0].toUpperCase()}</span><span><strong>{stay.tenant.fullName}</strong><small>{stay.tenant.phone}</small></span></span></td><td>{stay.bed.room.property.name}<small className="table-subline">Room {stay.bed.room.identifier} · Bed {stay.bed.label}</small></td><td>{dateLabel(stay.checkIn)}</td><td>{stay.plannedCheckOut ? dateLabel(stay.plannedCheckOut) : "Not set"}</td><td>{formatINR(stay.agreedMonthlyRent)}</td><td><button className="button secondary compact" onClick={() => { if (window.confirm(`Check out ${stay.tenant.fullName}?`)) checkout.mutate(stay.id); }} disabled={checkout.isPending}>Check out</button></td></tr>)}</tbody></table></div>}
     </section>
-    {showForm && <OccupancyForm tenants={tenants.data || []} beds={roomQueries.data || []} onClose={() => setShowForm(false)} busy={create.isPending} onSubmit={async (data) => { await create.mutateAsync(data); }} />}
+    {showForm && <OccupancyForm tenants={tenants.data || []} beds={roomQueries.data?.beds || []} rooms={roomQueries.data?.rooms || []} onClose={() => setShowForm(false)} onAddBed={(propertyId, roomId) => navigate(`/inventory?propertyId=${encodeURIComponent(propertyId)}&roomId=${encodeURIComponent(roomId)}&newBed=1`)} busy={create.isPending} onSubmit={async (data) => { await create.mutateAsync(data); }} />}
   </div>;
 }
 

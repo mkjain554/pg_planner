@@ -195,11 +195,16 @@ const occupancySchema = z.object({
   agreedMonthlyRent: z.string().trim().regex(/^\d{1,10}(?:\.\d{1,2})?$/, "Enter an amount with up to 10 digits and 2 decimal places."),
   agreedDeposit: z.string().trim().regex(/^\d{1,10}(?:\.\d{1,2})?$/, "Enter an amount with up to 10 digits and 2 decimal places."),
 });
-export function OccupancyForm({ tenants, beds, onClose, onSubmit, busy }: {
+export function OccupancyForm({ tenants, beds, rooms = [], onClose, onAddBed, onSubmit, busy }: {
   tenants: Tenant[]; beds: (Bed & { room: Room & { property: Property } })[];
+  rooms: (Room & { beds: Bed[]; property: Property })[];
   onClose: () => void; onSubmit: (data: object) => Promise<void>; busy: boolean;
+  onAddBed: (propertyId: string, roomId: string) => void;
 }) {
-  const availableBeds = beds.filter((bed) => bed.status === "AVAILABLE");
+  const availableBeds = beds.filter((bed) =>
+    bed.status === "AVAILABLE" && bed.room.status === "ACTIVE" && bed.room.property.status === "ACTIVE",
+  );
+  const roomsWithCapacity = rooms.filter((room) => room.status === "ACTIVE" && room.beds.length < room.capacity);
   const form = useForm<z.infer<typeof occupancySchema>>({
     resolver: zodResolver(occupancySchema),
     defaultValues: { tenantId: "", bedId: "", checkIn: new Date().toISOString().slice(0, 10), plannedCheckOut: "", agreedMonthlyRent: "0.00", agreedDeposit: "0.00" },
@@ -211,7 +216,12 @@ export function OccupancyForm({ tenants, beds, onClose, onSubmit, busy }: {
   })))}>
     <div className="form-grid">
       <FormField label="Tenant"><select {...form.register("tenantId")}><option value="">Choose a tenant</option>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.fullName} · {tenant.phone}</option>)}</select></FormField>
-      <FormField label="Available bed"><select {...form.register("bedId")}><option value="">Choose a bed</option>{availableBeds.map((bed) => <option key={bed.id} value={bed.id}>{bed.room.property.name} · Room {bed.room.identifier} · Bed {bed.label}</option>)}</select>{availableBeds.length === 0 && <small>No available beds yet. Add a property, room and bed first.</small>}</FormField>
+      <FormField label="Available bed"><select {...form.register("bedId")}><option value="">Choose a bed</option>{availableBeds.map((bed) => <option key={bed.id} value={bed.id}>{bed.room.property.name} · Room {bed.room.identifier} · Bed {bed.label}</option>)}</select></FormField>
+      {availableBeds.length === 0 && <p className="form-hint" role="status">No beds are currently available. A room needs at least one available bed before a tenant can check in.</p>}
+      {roomsWithCapacity.length > 0 ? <div className="form-hint">
+        <p>Rooms do not create beds automatically. Add a bed to a room with capacity and set its rent and deposit:</p>
+        <div className="modal-actions">{roomsWithCapacity.map((room) => <button key={room.id} type="button" className="button secondary compact" onClick={() => onAddBed(room.property.id, room.id)}>Add a bed · {room.property.name} · Room {room.identifier}</button>)}</div>
+      </div> : availableBeds.length === 0 && <p className="form-hint">There are no active rooms with unused bed capacity. Add capacity in Rooms &amp; Beds, or check out a current tenant to free a bed.</p>}
       <div className="form-grid two">
         <FormField label="Check-in date"><input type="date" {...form.register("checkIn")} /></FormField>
         <FormField label="Planned check-out"><input type="date" {...form.register("plannedCheckOut")} /></FormField>
